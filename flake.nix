@@ -99,7 +99,7 @@
               version = "0.1.0";
               src = ./.;
               fetcherVersion = 3;
-              hash = "sha256-8P6WI9iOKFSSI7vkRXuOBY/Ab57mY72OT2XW0/zGcjQ=";
+              hash = "sha256-XSXofgWErXbFF/ajS0vGchLzzJPeMPvGlswliqdKU6k=";
             };
 
             # Set up Cargo vendor directory

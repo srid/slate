@@ -1,6 +1,6 @@
-import { createSignal, onMount, Show } from 'solid-js';
+import { createSignal, onMount, onCleanup, Show, For } from 'solid-js';
 
-import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
+import { readTextFile, writeTextFile, exists, watch, type UnwatchFn, type WatchEvent } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
 import WysiwygEditor from './components/WysiwygEditor';
 
@@ -13,9 +13,21 @@ function App() {
   const [isLoaded, setIsLoaded] = createSignal(false);
   const [isDirty, setIsDirty] = createSignal(false);
   const [isDark, setIsDark] = createSignal(false);
-  const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle'>('idle');
+  const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle' | 'reloaded'>('idle');
   const [error, setError] = createSignal<string | null>(null);
+  const [editorKey, setEditorKey] = createSignal(0); // Key to force editor remount
   let saveTimeout: number | undefined;
+  let unwatchFn: UnwatchFn | null = null;
+  let isWriting = false; // Flag to skip our own writes
+
+  // Check if the event is a modify or create event
+  const isModifyOrCreateEvent = (event: WatchEvent): boolean => {
+    const type = event.type;
+    if (typeof type === 'object') {
+      return 'modify' in type || 'create' in type;
+    }
+    return false;
+  };
 
   // Initialize theme and load file on mount
   onMount(async () => {
@@ -41,9 +53,39 @@ function App() {
         setContent('# New Document\n\nStart writing here...\n');
       }
       setIsLoaded(true);
+
+      // Start watching for external changes
+      unwatchFn = await watch(fullPath, async (event) => {
+        // Skip if we're currently writing (our own change)
+        if (isWriting) return;
+        
+        // Reload file on external modification
+        if (isModifyOrCreateEvent(event)) {
+          try {
+            const newContent = await readTextFile(fullPath);
+            // Only update if content actually changed
+            if (newContent !== content()) {
+              setContent(newContent);
+              setEditorKey(k => k + 1); // Force editor remount
+              setIsDirty(false);
+              setSaveStatus('reloaded');
+              setTimeout(() => setSaveStatus('idle'), 1500);
+            }
+          } catch (err) {
+            console.error('Failed to reload file:', err);
+          }
+        }
+      });
     } catch (err) {
       setError(`Failed to load file: ${err}`);
       console.error('Failed to load file:', err);
+    }
+  });
+
+  // Cleanup watcher on unmount
+  onCleanup(async () => {
+    if (unwatchFn) {
+      await unwatchFn();
     }
   });
 
@@ -67,12 +109,15 @@ function App() {
     saveTimeout = window.setTimeout(async () => {
       try {
         setSaveStatus('saving');
+        isWriting = true; // Set flag before writing
         await writeTextFile(path, newContent);
+        isWriting = false; // Clear flag after writing
         setIsDirty(false);
         setSaveStatus('saved');
         // Clear "saved" status after a moment
         setTimeout(() => setSaveStatus('idle'), 1500);
       } catch (err) {
+        isWriting = false;
         setError(`Auto-save failed: ${err}`);
         console.error('Auto-save failed:', err);
       }
@@ -100,6 +145,7 @@ function App() {
             {getFileName()}
             {saveStatus() === 'saving' && <span class="text-[var(--color-text-muted)] ml-2">Saving...</span>}
             {saveStatus() === 'saved' && <span class="text-green-500 ml-2">Saved</span>}
+            {saveStatus() === 'reloaded' && <span class="text-blue-500 ml-2">Reloaded</span>}
             {isDirty() && saveStatus() === 'idle' && <span class="text-[var(--color-accent)] ml-1">•</span>}
           </span>
         </div>
@@ -110,10 +156,12 @@ function App() {
         </div>
       </header>
 
-      {/* WYSIWYG Editor */}
+      {/* WYSIWYG Editor - For with key forces remount on external file change */}
       <main class="flex-1 overflow-hidden">
         <Show when={isLoaded()} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
-          <WysiwygEditor content={content()} onContentChange={handleContentChange} />
+          <For each={[editorKey()]}>
+            {(_key) => <WysiwygEditor content={content()} onContentChange={handleContentChange} />}
+          </For>
         </Show>
       </main>
     </div>

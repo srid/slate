@@ -17,6 +17,10 @@
     {
       "identifier": "fs:allow-write-text-file",
       "allow": [{ "path": "$HOME/Dropbox/**" }]
+    },
+    {
+      "identifier": "fs:allow-watch",
+      "allow": [{ "path": "$HOME/Dropbox/**" }]
     }
   ]
 }
