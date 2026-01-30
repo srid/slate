@@ -3,6 +3,11 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { common, createLowlight } from 'lowlight';
+
+// Create a lowlight instance with common languages
+const lowlight = createLowlight(common);
 
 interface WysiwygEditorProps {
   content: string;
@@ -18,8 +23,15 @@ function WysiwygEditor(props: WysiwygEditorProps) {
     editor = new Editor({
       element: ref,
       extensions: [
-        StarterKit,
+        StarterKit.configure({
+          // Disable the default codeBlock as we're using CodeBlockLowlight
+          codeBlock: false,
+        }),
         Typography,
+        CodeBlockLowlight.configure({
+          lowlight,
+          defaultLanguage: 'plaintext',
+        }),
         Markdown,
       ],
       content: props.content,

@@ -316,3 +316,126 @@ body {
   height: 0;
   pointer-events: none;
 }
+
+/* Code block with language label */
+.wysiwyg-content pre {
+  position: relative;
+}
+
+.wysiwyg-content pre code::before {
+  content: attr(class);
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.65rem;
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+}
+
+/* Syntax Highlighting - Dark theme */
+html.dark .hljs-comment,
+html.dark .hljs-quote {
+  color: #6a737d;
+}
+
+html.dark .hljs-keyword,
+html.dark .hljs-selector-tag,
+html.dark .hljs-literal,
+html.dark .hljs-doctag {
+  color: #f97583;
+}
+
+html.dark .hljs-string,
+html.dark .hljs-title,
+html.dark .hljs-section,
+html.dark .hljs-built_in,
+html.dark .hljs-name,
+html.dark .hljs-attr {
+  color: #9ecbff;
+}
+
+html.dark .hljs-number,
+html.dark .hljs-meta,
+html.dark .hljs-type,
+html.dark .hljs-params {
+  color: #79b8ff;
+}
+
+html.dark .hljs-function,
+html.dark .hljs-title.function_ {
+  color: #b392f0;
+}
+
+html.dark .hljs-variable,
+html.dark .hljs-template-variable {
+  color: #ffab70;
+}
+
+html.dark .hljs-regexp {
+  color: #dbedff;
+}
+
+html.dark .hljs-addition {
+  color: #85e89d;
+  background-color: #22863a40;
+}
+
+html.dark .hljs-deletion {
+  color: #f97583;
+  background-color: #b31d2840;
+}
+
+/* Syntax Highlighting - Light theme */
+:root .hljs-comment,
+:root .hljs-quote {
+  color: #6a737d;
+}
+
+:root .hljs-keyword,
+:root .hljs-selector-tag,
+:root .hljs-literal,
+:root .hljs-doctag {
+  color: #d73a49;
+}
+
+:root .hljs-string,
+:root .hljs-title,
+:root .hljs-section,
+:root .hljs-built_in,
+:root .hljs-name,
+:root .hljs-attr {
+  color: #032f62;
+}
+
+:root .hljs-number,
+:root .hljs-meta,
+:root .hljs-type,
+:root .hljs-params {
+  color: #005cc5;
+}
+
+:root .hljs-function,
+:root .hljs-title.function_ {
+  color: #6f42c1;
+}
+
+:root .hljs-variable,
+:root .hljs-template-variable {
+  color: #e36209;
+}
+
+:root .hljs-regexp {
+  color: #22863a;
+}
+
+:root .hljs-addition {
+  color: #22863a;
+  background-color: #f0fff4;
+}
+
+:root .hljs-deletion {
+  color: #b31d28;
+  background-color: #ffeef0;
+}
