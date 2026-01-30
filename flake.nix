@@ -64,53 +64,26 @@
           isLinux = pkgs.stdenv.isLinux;
           isDarwin = pkgs.stdenv.isDarwin;
 
-          # Build the frontend using pnpm
-          frontendBuild = pkgs.stdenv.mkDerivation (finalAttrs: {
-            pname = "slate-frontend";
+          # Fetch Cargo dependencies for offline build
+          cargoDeps = pkgs.rustPlatform.importCargoLock {
+            lockFile = ./src-tauri/Cargo.lock;
+          };
+
+          # Build the Tauri app with proper bundling
+          slate = pkgs.stdenv.mkDerivation (finalAttrs: {
+            pname = "slate";
             version = "0.1.0";
             src = ./.;
 
-            nativeBuildInputs = with pkgs; [ 
-              nodejs_22 
+            nativeBuildInputs = with pkgs; [
+              rustToolchain
+              cargo-tauri
+              pkg-config
+              nodejs_22
               pnpm
               pnpmConfigHook
-            ];
-
-            # Fetch pnpm dependencies
-            pnpmDeps = pkgs.fetchPnpmDeps {
-              pname = "slate-frontend-deps";
-              version = "0.1.0";
-              src = ./.;
-              fetcherVersion = 3;
-              hash = "sha256-FipCvudNewZmCRu7zDIWJqLif4/lmE/w+19kUl/4Yu4="; # pnpm deps hash
-            };
-
-            buildPhase = ''
-              runHook preBuild
-              pnpm build
-              runHook postBuild
-            '';
-
-            installPhase = ''
-              runHook preInstall
-              cp -r dist $out
-              runHook postInstall
-            '';
-          });
-
-          # Build the Tauri app
-          slate = pkgs.rustPlatform.buildRustPackage {
-            pname = "slate";
-            version = "0.1.0";
-            src = ./src-tauri;
-
-            cargoLock = {
-              lockFile = ./src-tauri/Cargo.lock;
-            };
-
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              cargo-tauri
+            ] ++ lib.optionals isDarwin [
+              pkgs.xcbuild
             ];
 
             buildInputs = with pkgs; [
@@ -120,13 +93,78 @@
                 pkgs.apple-sdk
               ]);
 
-            # Copy frontend build to the right place
-            preBuild = ''
-              mkdir -p ../dist
-              cp -r ${frontendBuild}/* ../dist/
+            # Fetch pnpm dependencies
+            pnpmDeps = pkgs.fetchPnpmDeps {
+              pname = "slate-pnpm-deps";
+              version = "0.1.0";
+              src = ./.;
+              fetcherVersion = 3;
+              hash = "sha256-FipCvudNewZmCRu7zDIWJqLif4/lmE/w+19kUl/4Yu4=";
+            };
+
+            # Set up Cargo vendor directory
+            postUnpack = ''
+              export CARGO_HOME=$(mktemp -d)
+              cp -r ${cargoDeps} $CARGO_HOME/registry
+              chmod -R u+w $CARGO_HOME
             '';
 
-            # Tauri expects frontend at specific location
+            configurePhase = ''
+              runHook preConfigure
+              
+              # Configure Cargo to use vendored dependencies
+              mkdir -p src-tauri/.cargo
+              cat > src-tauri/.cargo/config.toml << EOF
+              [source.crates-io]
+              replace-with = "vendored-sources"
+
+              [source.vendored-sources]
+              directory = "${cargoDeps}"
+              EOF
+              
+              runHook postConfigure
+            '';
+
+            buildPhase = ''
+              runHook preBuild
+              
+              # Build frontend first
+              pnpm build
+              
+              # Build Tauri app with bundling
+              cd src-tauri
+              cargo tauri build --bundles ${if isDarwin then "app" else "deb"}
+              cd ..
+              
+              runHook postBuild
+            '';
+
+            installPhase = ''
+              runHook preInstall
+              
+              ${if isDarwin then ''
+                # Copy macOS .app bundle
+                mkdir -p $out/Applications
+                cp -r src-tauri/target/release/bundle/macos/*.app $out/Applications/
+                
+                # Create bin symlink for nix run
+                mkdir -p $out/bin
+                ln -s "$out/Applications/Slate.app/Contents/MacOS/Slate" $out/bin/slate
+              '' else ''
+                # Copy Linux binary and desktop files
+                mkdir -p $out/bin
+                cp src-tauri/target/release/slate $out/bin/
+                
+                # Copy .deb contents if available
+                if [ -d src-tauri/target/release/bundle/deb ]; then
+                  cp -r src-tauri/target/release/bundle/deb/* $out/ || true
+                fi
+              ''}
+              
+              runHook postInstall
+            '';
+
+            # Tauri build settings
             TAURI_SKIP_DEVSERVER_CHECK = "true";
 
             meta = with lib; {
@@ -136,12 +174,12 @@
               platforms = platforms.linux ++ platforms.darwin;
               mainProgram = "slate";
             };
-          };
+          });
         in
         {
           packages = {
             default = slate;
-            inherit slate frontendBuild;
+            inherit slate;
           };
 
           apps.default = {
