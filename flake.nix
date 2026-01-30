@@ -54,6 +54,17 @@
             glib
             at-spi2-atk
             atkmm
+
+            # Graphics/Wayland support for WebKitGTK
+            mesa
+            libGL
+            libglvnd
+            wayland
+            libxkbcommon
+            vulkan-loader
+
+            # GTK modules (silence warnings)
+            libcanberra-gtk3
           ];
 
           # macOS-specific packages
@@ -192,9 +203,11 @@
               ++ pkgs.lib.optionals isLinux linuxPackages
               ++ pkgs.lib.optionals isDarwin darwinPackages;
 
-            # Linux: Set up library paths for Tauri
+            # Linux: Set up library paths for Tauri with proper graphics support
             shellHook = pkgs.lib.optionalString isLinux ''
               export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath linuxPackages}:$LD_LIBRARY_PATH
+              # Ensure WebKitGTK can find EGL drivers
+              export WEBKIT_DISABLE_DMABUF_RENDERER=1
             '';
           };
         };
