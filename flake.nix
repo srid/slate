@@ -9,7 +9,7 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
 
-      perSystem = { pkgs, system, ... }:
+      perSystem = { pkgs, system, lib, ... }:
         let
           # Apply rust-overlay to get the latest stable Rust
           pkgsWithRust = import inputs.nixpkgs {
@@ -57,16 +57,136 @@
           ];
 
           # macOS-specific packages
-          # On macOS, Tauri uses the system WebKit - no explicit framework packages needed
-          # The apple-sdk is automatically available via stdenv on darwin
           darwinPackages = with pkgs; [
             libiconv
           ];
 
           isLinux = pkgs.stdenv.isLinux;
           isDarwin = pkgs.stdenv.isDarwin;
+
+          # Fetch Cargo dependencies for offline build
+          cargoDeps = pkgs.rustPlatform.importCargoLock {
+            lockFile = ./src-tauri/Cargo.lock;
+          };
+
+          # Build the Tauri app with proper bundling
+          slate = pkgs.stdenv.mkDerivation (finalAttrs: {
+            pname = "slate";
+            version = "0.1.0";
+            src = ./.;
+
+            nativeBuildInputs = with pkgs; [
+              rustToolchain
+              cargo-tauri
+              pkg-config
+              nodejs_22
+              pnpm
+              pnpmConfigHook
+            ] ++ lib.optionals isDarwin [
+              pkgs.xcbuild
+            ];
+
+            buildInputs = with pkgs; [
+              openssl
+            ] ++ lib.optionals isLinux linuxPackages
+              ++ lib.optionals isDarwin (darwinPackages ++ [
+                pkgs.apple-sdk
+              ]);
+
+            # Fetch pnpm dependencies
+            pnpmDeps = pkgs.fetchPnpmDeps {
+              pname = "slate-pnpm-deps";
+              version = "0.1.0";
+              src = ./.;
+              fetcherVersion = 3;
+              hash = "sha256-FipCvudNewZmCRu7zDIWJqLif4/lmE/w+19kUl/4Yu4=";
+            };
+
+            # Set up Cargo vendor directory
+            postUnpack = ''
+              export CARGO_HOME=$(mktemp -d)
+              cp -r ${cargoDeps} $CARGO_HOME/registry
+              chmod -R u+w $CARGO_HOME
+            '';
+
+            configurePhase = ''
+              runHook preConfigure
+              
+              # Configure Cargo to use vendored dependencies
+              mkdir -p src-tauri/.cargo
+              cat > src-tauri/.cargo/config.toml << EOF
+              [source.crates-io]
+              replace-with = "vendored-sources"
+
+              [source.vendored-sources]
+              directory = "${cargoDeps}"
+              EOF
+              
+              runHook postConfigure
+            '';
+
+            buildPhase = ''
+              runHook preBuild
+              
+              # Build frontend first
+              pnpm build
+              
+              # Build Tauri app with bundling
+              cd src-tauri
+              cargo tauri build --bundles ${if isDarwin then "app" else "deb"}
+              cd ..
+              
+              runHook postBuild
+            '';
+
+            installPhase = ''
+              runHook preInstall
+              
+              ${if isDarwin then ''
+                # Copy macOS .app bundle
+                mkdir -p $out/Applications
+                cp -r src-tauri/target/release/bundle/macos/*.app $out/Applications/
+                
+                # Create bin symlink for nix run
+                mkdir -p $out/bin
+                ln -s "$out/Applications/Slate.app/Contents/MacOS/Slate" $out/bin/slate
+              '' else ''
+                # Copy Linux binary and desktop files
+                mkdir -p $out/bin
+                cp src-tauri/target/release/slate $out/bin/
+                
+                # Copy .deb contents if available
+                if [ -d src-tauri/target/release/bundle/deb ]; then
+                  cp -r src-tauri/target/release/bundle/deb/* $out/ || true
+                fi
+              ''}
+              
+              runHook postInstall
+            '';
+
+            # Tauri build settings
+            TAURI_SKIP_DEVSERVER_CHECK = "true";
+
+            meta = with lib; {
+              description = "A cross-platform markdown editor built with Tauri";
+              homepage = "https://github.com/srid/slate";
+              license = licenses.agpl3Plus;
+              platforms = platforms.linux ++ platforms.darwin;
+              mainProgram = "slate";
+            };
+          });
         in
         {
+          packages = {
+            default = slate;
+            inherit slate;
+          };
+
+          apps.default = {
+            type = "app";
+            program = "${slate}/bin/slate";
+          };
+
           devShells.default = pkgs.mkShell {
             packages = commonPackages
               ++ pkgs.lib.optionals isLinux linuxPackages
