@@ -4,6 +4,8 @@ import StarterKit from '@tiptap/starter-kit';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
 import { common, createLowlight } from 'lowlight';
 
 // Create a lowlight instance with common languages
@@ -31,6 +33,10 @@ function WysiwygEditor(props: WysiwygEditorProps) {
         CodeBlockLowlight.configure({
           lowlight,
           defaultLanguage: 'plaintext',
+        }),
+        TaskList,
+        TaskItem.configure({
+          nested: true, // Allow nested task lists
         }),
         Markdown,
       ],
