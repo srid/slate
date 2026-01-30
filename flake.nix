@@ -55,6 +55,10 @@
             at-spi2-atk
             atkmm
 
+            # TLS/HTTPS support for WebKitGTK
+            glib-networking
+            cacert
+
             # Graphics/Wayland support for WebKitGTK
             mesa
             libGL
@@ -203,11 +207,14 @@
               ++ pkgs.lib.optionals isLinux linuxPackages
               ++ pkgs.lib.optionals isDarwin darwinPackages;
 
-            # Linux: Set up library paths for Tauri with proper graphics support
+            # Linux: Set up library paths for Tauri with proper graphics and TLS support
             shellHook = pkgs.lib.optionalString isLinux ''
               export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath linuxPackages}:$LD_LIBRARY_PATH
               # Ensure WebKitGTK can find EGL drivers
               export WEBKIT_DISABLE_DMABUF_RENDERER=1
+              # SSL/TLS support for WebKitGTK
+              export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+              export GIO_EXTRA_MODULES="${pkgs.glib-networking}/lib/gio/modules"
             '';
           };
         };

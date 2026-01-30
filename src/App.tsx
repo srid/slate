@@ -1,26 +1,34 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js';
 
 import { readTextFile, writeTextFile, exists, watch, type UnwatchFn, type WatchEvent } from '@tauri-apps/plugin-fs';
-import { homeDir } from '@tauri-apps/api/path';
 import WysiwygEditor from './components/WysiwygEditor';
+import FileFinder from './components/FileFinder';
+import { scanVault, type FileEntry } from './services/fileService';
 
-// File path relative to home directory
-const SLATE_FILE_RELATIVE = 'Dropbox/Vault/slate-demo.md';
+// Vault directory relative to home
+const VAULT_ROOT_RELATIVE = 'Dropbox/Vault';
 
 function App() {
+  console.log('[App] Rendering...');
+  // Multi-file state
+  const [files, setFiles] = createSignal<FileEntry[]>([]);
+  const [currentFile, setCurrentFile] = createSignal<FileEntry | null>(null);
+  const [finderOpen, setFinderOpen] = createSignal(false);
+
+  // Editor state
   const [content, setContent] = createSignal('');
-  const [filePath, setFilePath] = createSignal('');
   const [isLoaded, setIsLoaded] = createSignal(false);
+  const [isScanning, setIsScanning] = createSignal(true); // Vault scan in progress
   const [isDirty, setIsDirty] = createSignal(false);
   const [isDark, setIsDark] = createSignal(false);
   const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle' | 'reloaded'>('idle');
   const [error, setError] = createSignal<string | null>(null);
-  const [editorKey, setEditorKey] = createSignal(0); // Key to force editor remount
+  const [editorKey, setEditorKey] = createSignal(0);
+
   let saveTimeout: number | undefined;
   let unwatchFn: UnwatchFn | null = null;
-  let isWriting = false; // Flag to skip our own writes
+  let isWriting = false;
 
-  // Check if the event is a modify or create event
   const isModifyOrCreateEvent = (event: WatchEvent): boolean => {
     const type = event.type;
     if (typeof type === 'object') {
@@ -29,44 +37,63 @@ function App() {
     return false;
   };
 
-  // Initialize theme and load file on mount
-  onMount(async () => {
-    // Theme
-    const stored = localStorage.getItem('slate-theme');
-    const prefersDark = stored === 'dark';
-    setIsDark(prefersDark);
-    document.documentElement.classList.toggle('dark', prefersDark);
+  // Save current file immediately (used before switching)
+  const saveCurrentFile = async (): Promise<void> => {
+    const file = currentFile();
+    if (!file || !isDirty()) return;
 
-    // Build file path from home directory
+    if (saveTimeout) clearTimeout(saveTimeout);
+
     try {
-      const home = await homeDir();
-      const fullPath = home.endsWith('/') ? `${home}${SLATE_FILE_RELATIVE}` : `${home}/${SLATE_FILE_RELATIVE}`;
-      setFilePath(fullPath);
-      
-      const fileExists = await exists(fullPath);
+      isWriting = true;
+      await writeTextFile(file.path, content());
+      isWriting = false;
+      setIsDirty(false);
+    } catch (err) {
+      isWriting = false;
+      console.error('Failed to save file:', err);
+    }
+  };
+
+  // Load a file into the editor
+  const loadFile = async (file: FileEntry): Promise<void> => {
+    // Save current file first if dirty
+    await saveCurrentFile();
+
+    // Cleanup previous watcher
+    if (unwatchFn) {
+      await unwatchFn();
+      unwatchFn = null;
+    }
+
+    setIsLoaded(false);
+    setError(null);
+
+    try {
+      const fileExists = await exists(file.path);
       if (fileExists) {
-        const text = await readTextFile(fullPath);
+        const text = await readTextFile(file.path);
         setContent(text);
       } else {
-        // Create the file if it doesn't exist
-        await writeTextFile(fullPath, '# New Document\n\nStart writing here...\n');
-        setContent('# New Document\n\nStart writing here...\n');
+        setError(`File not found: ${file.relativePath}`);
+        return;
       }
+
+      setCurrentFile(file);
+      setIsDirty(false);
+      setEditorKey(k => k + 1);
       setIsLoaded(true);
 
-      // Start watching for external changes
-      unwatchFn = await watch(fullPath, async (event) => {
-        // Skip if we're currently writing (our own change)
+      // Watch for external changes
+      unwatchFn = await watch(file.path, async (event) => {
         if (isWriting) return;
-        
-        // Reload file on external modification
+
         if (isModifyOrCreateEvent(event)) {
           try {
-            const newContent = await readTextFile(fullPath);
-            // Only update if content actually changed
+            const newContent = await readTextFile(file.path);
             if (newContent !== content()) {
               setContent(newContent);
-              setEditorKey(k => k + 1); // Force editor remount
+              setEditorKey(k => k + 1);
               setIsDirty(false);
               setSaveStatus('reloaded');
               setTimeout(() => setSaveStatus('idle'), 1500);
@@ -80,6 +107,52 @@ function App() {
       setError(`Failed to load file: ${err}`);
       console.error('Failed to load file:', err);
     }
+  };
+
+  // Handle file selection from finder
+  const handleFileSelect = (file: FileEntry) => {
+    setFinderOpen(false);
+    loadFile(file);
+  };
+
+  // Initialize on mount
+  onMount(async () => {
+    // Theme
+    const stored = localStorage.getItem('slate-theme');
+    const prefersDark = stored === 'dark';
+    setIsDark(prefersDark);
+    document.documentElement.classList.toggle('dark', prefersDark);
+
+    // Scan vault for markdown files
+    setIsScanning(true);
+    try {
+      const vaultFiles = await scanVault(VAULT_ROOT_RELATIVE);
+      setFiles(vaultFiles);
+      setIsScanning(false);
+
+      // Load first file if available
+      if (vaultFiles.length > 0) {
+        await loadFile(vaultFiles[0]);
+      } else {
+        setError('No markdown files found in vault');
+        setIsLoaded(true);
+      }
+    } catch (err) {
+      setIsScanning(false);
+      setError(`Failed to scan vault: ${err}`);
+      console.error('Failed to scan vault:', err);
+      setIsLoaded(true);
+    }
+
+    // Global keyboard shortcuts
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+        e.preventDefault();
+        setFinderOpen(true);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    onCleanup(() => document.removeEventListener('keydown', handleKeyDown));
   });
 
   // Cleanup watcher on unmount
@@ -99,22 +172,21 @@ function App() {
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
     setIsDirty(true);
-    setError(null); // Clear error on edit
-    
-    const path = filePath();
-    if (!path) return; // Not yet initialized
-    
+    setError(null);
+
+    const file = currentFile();
+    if (!file) return;
+
     // Debounced auto-save
     if (saveTimeout) clearTimeout(saveTimeout);
     saveTimeout = window.setTimeout(async () => {
       try {
         setSaveStatus('saving');
-        isWriting = true; // Set flag before writing
-        await writeTextFile(path, newContent);
-        isWriting = false; // Clear flag after writing
+        isWriting = true;
+        await writeTextFile(file.path, newContent);
+        isWriting = false;
         setIsDirty(false);
         setSaveStatus('saved');
-        // Clear "saved" status after a moment
         setTimeout(() => setSaveStatus('idle'), 1500);
       } catch (err) {
         isWriting = false;
@@ -124,12 +196,21 @@ function App() {
     }, 500);
   };
 
-  const getFileName = () => {
-    return SLATE_FILE_RELATIVE.split('/').pop() || 'slate-demo.md';
+  const getDisplayPath = () => {
+    const file = currentFile();
+    return file ? file.relativePath : 'No file';
   };
 
   return (
     <div class="flex flex-col h-screen bg-[var(--color-bg-primary)]">
+      {/* File Finder Modal */}
+      <FileFinder
+        files={files()}
+        isOpen={finderOpen()}
+        onClose={() => setFinderOpen(false)}
+        onSelect={handleFileSelect}
+      />
+
       {/* Error Banner */}
       <Show when={error()}>
         <div class="px-4 py-2 bg-red-500/20 border-b border-red-500/50 text-red-400 text-sm">
@@ -141,13 +222,17 @@ function App() {
       <header class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
         <div class="flex items-center gap-3">
           <h1 class="text-lg font-semibold text-[var(--color-text-primary)]">Slate</h1>
-          <span class="text-sm text-[var(--color-text-secondary)]">
-            {getFileName()}
+          <button
+            class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] cursor-pointer"
+            onClick={() => setFinderOpen(true)}
+            title="Open file (Ctrl+P)"
+          >
+            {isScanning() ? 'Scanning vault...' : getDisplayPath()}
             {saveStatus() === 'saving' && <span class="text-[var(--color-text-muted)] ml-2">Saving...</span>}
             {saveStatus() === 'saved' && <span class="text-green-500 ml-2">Saved</span>}
             {saveStatus() === 'reloaded' && <span class="text-blue-500 ml-2">Reloaded</span>}
             {isDirty() && saveStatus() === 'idle' && <span class="text-[var(--color-accent)] ml-1">•</span>}
-          </span>
+          </button>
         </div>
         <div class="flex items-center gap-2">
           <button class="toolbar-button" onClick={toggleTheme} title={isDark() ? 'Switch to light mode' : 'Switch to dark mode'}>
@@ -156,9 +241,9 @@ function App() {
         </div>
       </header>
 
-      {/* WYSIWYG Editor - For with key forces remount on external file change */}
+      {/* WYSIWYG Editor */}
       <main class="flex-1 overflow-hidden">
-        <Show when={isLoaded()} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
+        <Show when={isLoaded() && currentFile()} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
           <For each={[editorKey()]}>
             {(_key) => <WysiwygEditor content={content()} onContentChange={handleContentChange} />}
           </For>

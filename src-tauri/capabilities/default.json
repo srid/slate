@@ -2,25 +2,51 @@
   "$schema": "https://schema.tauri.app/config/2",
   "identifier": "default",
   "description": "Default capabilities for the Slate application",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "fs:default",
     {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        {
+          "path": "$HOME/Dropbox/**"
+        }
+      ]
+    },
+    {
       "identifier": "fs:allow-exists",
-      "allow": [{ "path": "$HOME/Dropbox/**" }]
+      "allow": [
+        {
+          "path": "$HOME/Dropbox/**"
+        }
+      ]
     },
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$HOME/Dropbox/**" }]
+      "allow": [
+        {
+          "path": "$HOME/Dropbox/**"
+        }
+      ]
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "$HOME/Dropbox/**" }]
+      "allow": [
+        {
+          "path": "$HOME/Dropbox/**"
+        }
+      ]
     },
     {
       "identifier": "fs:allow-watch",
-      "allow": [{ "path": "$HOME/Dropbox/**" }]
+      "allow": [
+        {
+          "path": "$HOME/Dropbox/**"
+        }
+      ]
     }
   ]
 }
