@@ -1,19 +1,33 @@
 @import "tailwindcss";
 
-/* Design Tokens */
+/* Design Tokens - Light Mode (Default) */
 :root {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-bg-tertiary: #f1f5f9;
+  --color-accent: #7c3aed;
+  --color-accent-hover: #6d28d9;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94a3b8;
+  --color-border: #e2e8f0;
+  --color-border-subtle: #f1f5f9;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Dark Mode */
+html.dark {
   --color-bg-primary: #0f0f1a;
   --color-bg-secondary: #1a1a2e;
   --color-bg-tertiary: #252542;
-  --color-accent: #7c3aed;
-  --color-accent-hover: #8b5cf6;
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #a78bfa;
   --color-text-primary: #f8fafc;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
   --color-border: #334155;
   --color-border-subtle: #1e293b;
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 /* Base Styles */

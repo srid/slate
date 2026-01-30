@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createSignal, onMount } from 'solid-js';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import Editor from './components/Editor';
@@ -12,7 +12,7 @@ A beautiful markdown editor built with **Tauri** and **SolidJS**.
 
 - 📝 **Live Preview** - See your changes in real-time
 - 💾 **Native File Dialogs** - Open and save files seamlessly
-- 🎨 **Dark Theme** - Easy on the eyes
+- 🎨 **Light & Dark Themes** - Choose your style
 - ⚡ **Fast** - Built with Rust and SolidJS
 
 ## Getting Started
@@ -40,6 +40,22 @@ function App() {
   const [content, setContent] = createSignal(SAMPLE_MARKDOWN);
   const [currentFile, setCurrentFile] = createSignal<string | null>(null);
   const [isDirty, setIsDirty] = createSignal(false);
+  const [isDark, setIsDark] = createSignal(false);
+
+  // Initialize theme from localStorage
+  onMount(() => {
+    const stored = localStorage.getItem('slate-theme');
+    const prefersDark = stored === 'dark';
+    setIsDark(prefersDark);
+    document.documentElement.classList.toggle('dark', prefersDark);
+  });
+
+  const toggleTheme = () => {
+    const newDark = !isDark();
+    setIsDark(newDark);
+    document.documentElement.classList.toggle('dark', newDark);
+    localStorage.setItem('slate-theme', newDark ? 'dark' : 'light');
+  };
 
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
@@ -130,6 +146,9 @@ function App() {
             <SaveIcon />
             Save
           </button>
+          <button class="toolbar-button" onClick={toggleTheme} title={isDark() ? 'Switch to light mode' : 'Switch to dark mode'}>
+            {isDark() ? <SunIcon /> : <MoonIcon />}
+          </button>
         </div>
       </header>
 
@@ -172,6 +191,30 @@ function SaveIcon() {
       <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
       <polyline points="17 21 17 13 7 13 7 21" />
       <polyline points="7 3 7 8 15 8" />
+    </svg>
+  );
+}
+
+function SunIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   );
 }
