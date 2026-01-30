@@ -4,9 +4,11 @@ A cross-platform markdown editor built with **Tauri 2.0** and **SolidJS**. The f
 
 ## Features
 
-- 📝 **Live Preview** — See your changes in real-time
+- 📝 **WYSIWYG Editing** — Edit markdown with rich text formatting
+- ✅ **Task Lists** — Interactive checkboxes for GFM task lists
+- 🎨 **Syntax Highlighting** — Code blocks with Prism-powered highlighting
 - 💾 **Native File Dialogs** — Open and save files seamlessly
-- 🎨 **Dark Theme** — Easy on the eyes
+- 🌙 **Dark Theme** — Easy on the eyes
 - ⚡ **Fast** — Built with Rust and SolidJS
 - 🔒 **Secure** — No network required, runs entirely locally
 
@@ -16,9 +18,11 @@ A cross-platform markdown editor built with **Tauri 2.0** and **SolidJS**. The f
 |-------|------------|
 | Desktop Framework | Tauri 2.0 |
 | Frontend | SolidJS + TypeScript |
+| WYSIWYG Editor | Milkdown (ProseMirror-based) |
+| Markdown | GFM (GitHub Flavored Markdown) |
+| Syntax Highlighting | Refractor (Prism) |
 | Styling | Tailwind CSS v4 |
-| Markdown | marked |
-| Build | Vite |
+| Build | Vite + Nix |
 
 ## Development
 
@@ -37,7 +41,7 @@ nix develop
 pnpm install
 
 # Start development server
-pnpm tauri dev
+just dev
 ```
 
 ### Available Commands
@@ -51,7 +55,15 @@ just clean    # Clean build artifacts
 
 ## Building for Production
 
-### macOS
+### Using Nix (Recommended)
+
+```bash
+nix build
+```
+
+The built `.app` bundle will be in `result/Applications/Slate.app`.
+
+### Manual Build
 
 ```bash
 nix develop
@@ -60,42 +72,21 @@ pnpm tauri build
 
 The built app will be in `src-tauri/target/release/bundle/`.
 
-### Linux
-
-Ensure you have the required system dependencies (gtk3, webkit2gtk, etc.) installed via your package manager or Nix.
-
-```bash
-nix develop
-pnpm tauri build
-```
-
-### Windows
-
-1. Install [Rust](https://rustup.rs/) with MSVC toolchain
-2. Install [Node.js](https://nodejs.org/)
-3. Run:
-
-```powershell
-pnpm install
-pnpm tauri build
-```
-
 ## Project Structure
 
 ```
 slate/
-├── flake.nix              # Nix development environment
-├── justfile               # Command automation
-├── src/                   # SolidJS frontend
-│   ├── App.tsx           # Main app with split-pane layout
+├── flake.nix                 # Nix development environment & packaging
+├── justfile                  # Command automation
+├── src/                      # SolidJS frontend
+│   ├── App.tsx              # Main app layout
 │   └── components/
-│       ├── Editor.tsx    # Markdown textarea
-│       └── Preview.tsx   # Live HTML preview
-└── src-tauri/            # Rust/Tauri backend
+│       └── WysiwygEditor.tsx # Milkdown WYSIWYG editor
+└── src-tauri/               # Rust/Tauri backend
     ├── Cargo.toml
     ├── tauri.conf.json
     └── src/
-        └── lib.rs        # Plugin registration
+        └── lib.rs           # File operations & plugin registration
 ```
 
 ## License
