@@ -20,3 +20,6 @@ jobs:
 
       - name: Build devShell
         run: nix build .#devShells.$(nix eval --impure --raw --expr 'builtins.currentSystem').default
+
+      - name: Build package
+        run: nix build
