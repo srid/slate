@@ -2,8 +2,7 @@ import { createSignal, onMount, Show } from 'solid-js';
 
 import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
-import Editor from './components/Editor';
-import Preview from './components/Preview';
+import WysiwygEditor from './components/WysiwygEditor';
 
 // File path relative to home directory
 const SLATE_FILE_RELATIVE = 'Dropbox/Vault/slate-demo.md';
@@ -11,6 +10,7 @@ const SLATE_FILE_RELATIVE = 'Dropbox/Vault/slate-demo.md';
 function App() {
   const [content, setContent] = createSignal('');
   const [filePath, setFilePath] = createSignal('');
+  const [isLoaded, setIsLoaded] = createSignal(false);
   const [isDirty, setIsDirty] = createSignal(false);
   const [isDark, setIsDark] = createSignal(false);
   const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle'>('idle');
@@ -40,6 +40,7 @@ function App() {
         await writeTextFile(fullPath, '# New Document\n\nStart writing here...\n');
         setContent('# New Document\n\nStart writing here...\n');
       }
+      setIsLoaded(true);
     } catch (err) {
       setError(`Failed to load file: ${err}`);
       console.error('Failed to load file:', err);
@@ -109,14 +110,11 @@ function App() {
         </div>
       </header>
 
-      {/* Editor + Preview Split */}
-      <main class="flex flex-1 overflow-hidden">
-        <div class="w-1/2 border-r border-[var(--color-border)]">
-          <Editor content={content()} onContentChange={handleContentChange} />
-        </div>
-        <div class="w-1/2 bg-[var(--color-bg-secondary)]">
-          <Preview content={content()} />
-        </div>
+      {/* WYSIWYG Editor */}
+      <main class="flex-1 overflow-hidden">
+        <Show when={isLoaded()} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
+          <WysiwygEditor content={content()} onContentChange={handleContentChange} />
+        </Show>
       </main>
     </div>
   );
