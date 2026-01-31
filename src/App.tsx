@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js';
 
-import { readTextFile, writeTextFile, exists, watch, type UnwatchFn, type WatchEvent } from '@tauri-apps/plugin-fs';
+import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
 import WysiwygEditor from './components/WysiwygEditor';
 import FileFinder from './components/FileFinder';
 import { scanVault, type FileEntry } from './services/fileService';
@@ -21,21 +21,15 @@ function App() {
   const [isScanning, setIsScanning] = createSignal(true); // Vault scan in progress
   const [isDirty, setIsDirty] = createSignal(false);
   const [isDark, setIsDark] = createSignal(false);
-  const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle' | 'reloaded'>('idle');
+  const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle'>('idle');
   const [error, setError] = createSignal<string | null>(null);
   const [editorKey, setEditorKey] = createSignal(0);
 
-  let saveTimeout: number | undefined;
-  let unwatchFn: UnwatchFn | null = null;
-  let isWriting = false;
+  // Navigation history
+  const [history, setHistory] = createSignal<FileEntry[]>([]);
+  const [historyIndex, setHistoryIndex] = createSignal(-1);
 
-  const isModifyOrCreateEvent = (event: WatchEvent): boolean => {
-    const type = event.type;
-    if (typeof type === 'object') {
-      return 'modify' in type || 'create' in type;
-    }
-    return false;
-  };
+  let saveTimeout: number | undefined;
 
   // Save current file immediately (used before switching)
   const saveCurrentFile = async (): Promise<void> => {
@@ -45,12 +39,9 @@ function App() {
     if (saveTimeout) clearTimeout(saveTimeout);
 
     try {
-      isWriting = true;
       await writeTextFile(file.path, content());
-      isWriting = false;
       setIsDirty(false);
     } catch (err) {
-      isWriting = false;
       console.error('Failed to save file:', err);
     }
   };
@@ -59,12 +50,6 @@ function App() {
   const loadFile = async (file: FileEntry): Promise<void> => {
     // Save current file first if dirty
     await saveCurrentFile();
-
-    // Cleanup previous watcher
-    if (unwatchFn) {
-      await unwatchFn();
-      unwatchFn = null;
-    }
 
     setIsLoaded(false);
     setError(null);
@@ -83,36 +68,56 @@ function App() {
       setIsDirty(false);
       setEditorKey(k => k + 1);
       setIsLoaded(true);
-
-      // Watch for external changes
-      unwatchFn = await watch(file.path, async (event) => {
-        if (isWriting) return;
-
-        if (isModifyOrCreateEvent(event)) {
-          try {
-            const newContent = await readTextFile(file.path);
-            if (newContent !== content()) {
-              setContent(newContent);
-              setEditorKey(k => k + 1);
-              setIsDirty(false);
-              setSaveStatus('reloaded');
-              setTimeout(() => setSaveStatus('idle'), 1500);
-            }
-          } catch (err) {
-            console.error('Failed to reload file:', err);
-          }
-        }
-      });
     } catch (err) {
       setError(`Failed to load file: ${err}`);
       console.error('Failed to load file:', err);
     }
   };
 
-  // Handle file selection from finder
-  const handleFileSelect = (file: FileEntry) => {
+  // Handle file selection from finder or wikilink
+  const handleFileSelect = (file: FileEntry, addToHistory = true) => {
     setFinderOpen(false);
+
+    // Add to history if not navigating via back/forward
+    if (addToHistory) {
+      const current = currentFile();
+      if (current) {
+        // Truncate forward history and add current file
+        const newHistory = [...history().slice(0, historyIndex() + 1), current];
+        setHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
+      }
+    }
+
     loadFile(file);
+  };
+
+  // Navigation: Go Back
+  const canGoBack = () => historyIndex() >= 0;
+  const goBack = () => {
+    if (!canGoBack()) return;
+    const idx = historyIndex();
+    const file = history()[idx];
+    setHistoryIndex(idx - 1);
+    handleFileSelect(file, false);
+  };
+
+  // Navigation: Go Forward
+  const canGoForward = () => {
+    const idx = historyIndex();
+    const h = history();
+    // Can go forward if there's a current file and we're not at the end
+    return idx < h.length - 1 || (idx === h.length - 1 && currentFile() !== null);
+  };
+  const goForward = () => {
+    if (!canGoForward()) return;
+    const idx = historyIndex();
+    const h = history();
+    if (idx < h.length - 1) {
+      const nextFile = h[idx + 1];
+      setHistoryIndex(idx + 1);
+      handleFileSelect(nextFile, false);
+    }
   };
 
   // Initialize on mount
@@ -130,9 +135,10 @@ function App() {
       setFiles(vaultFiles);
       setIsScanning(false);
 
-      // Load first file if available
+      // Load INBOX.md by default, or first file if not found
       if (vaultFiles.length > 0) {
-        await loadFile(vaultFiles[0]);
+        const inbox = vaultFiles.find(f => f.name.toLowerCase() === 'inbox.md');
+        await loadFile(inbox || vaultFiles[0]);
       } else {
         setError('No markdown files found in vault');
         setIsLoaded(true);
@@ -153,13 +159,19 @@ function App() {
     };
     document.addEventListener('keydown', handleKeyDown);
     onCleanup(() => document.removeEventListener('keydown', handleKeyDown));
-  });
 
-  // Cleanup watcher on unmount
-  onCleanup(async () => {
-    if (unwatchFn) {
-      await unwatchFn();
-    }
+    // Mouse back/forward buttons
+    const handleMouseNav = (e: MouseEvent) => {
+      if (e.button === 3) { // Back button
+        e.preventDefault();
+        goBack();
+      } else if (e.button === 4) { // Forward button
+        e.preventDefault();
+        goForward();
+      }
+    };
+    document.addEventListener('mouseup', handleMouseNav);
+    onCleanup(() => document.removeEventListener('mouseup', handleMouseNav));
   });
 
   const toggleTheme = () => {
@@ -182,14 +194,11 @@ function App() {
     saveTimeout = window.setTimeout(async () => {
       try {
         setSaveStatus('saving');
-        isWriting = true;
         await writeTextFile(file.path, newContent);
-        isWriting = false;
         setIsDirty(false);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 1500);
       } catch (err) {
-        isWriting = false;
         setError(`Auto-save failed: ${err}`);
         console.error('Auto-save failed:', err);
       }
@@ -230,11 +239,29 @@ function App() {
             {isScanning() ? 'Scanning vault...' : getDisplayPath()}
             {saveStatus() === 'saving' && <span class="text-[var(--color-text-muted)] ml-2">Saving...</span>}
             {saveStatus() === 'saved' && <span class="text-green-500 ml-2">Saved</span>}
-            {saveStatus() === 'reloaded' && <span class="text-blue-500 ml-2">Reloaded</span>}
             {isDirty() && saveStatus() === 'idle' && <span class="text-[var(--color-accent)] ml-1">•</span>}
           </button>
         </div>
         <div class="flex items-center gap-2">
+          {/* Back/Forward navigation */}
+          <button
+            class="toolbar-button"
+            onClick={goBack}
+            disabled={!canGoBack()}
+            title="Go back (Alt+Left)"
+            style={{ opacity: canGoBack() ? 1 : 0.4 }}
+          >
+            <BackIcon />
+          </button>
+          <button
+            class="toolbar-button"
+            onClick={goForward}
+            disabled={!canGoForward()}
+            title="Go forward (Alt+Right)"
+            style={{ opacity: canGoForward() ? 1 : 0.4 }}
+          >
+            <ForwardIcon />
+          </button>
           <button class="toolbar-button" onClick={toggleTheme} title={isDark() ? 'Switch to light mode' : 'Switch to dark mode'}>
             {isDark() ? <SunIcon /> : <MoonIcon />}
           </button>
@@ -245,7 +272,12 @@ function App() {
       <main class="flex-1 overflow-hidden">
         <Show when={isLoaded() && currentFile()} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
           <For each={[editorKey()]}>
-            {(_key) => <WysiwygEditor content={content()} onContentChange={handleContentChange} />}
+            {(_key) => <WysiwygEditor
+              content={content()}
+              onContentChange={handleContentChange}
+              files={files()}
+              onNavigate={handleFileSelect}
+            />}
           </For>
         </Show>
       </main>
@@ -275,6 +307,22 @@ function MoonIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+function ForwardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   );
 }

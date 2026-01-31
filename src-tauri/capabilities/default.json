@@ -40,13 +40,6 @@
         }
       ]
     },
-    {
-      "identifier": "fs:allow-watch",
-      "allow": [
-        {
-          "path": "$HOME/Dropbox/**"
-        }
-      ]
-    }
+    "opener:default"
   ]
 }

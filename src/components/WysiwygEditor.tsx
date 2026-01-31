@@ -1,4 +1,5 @@
 import { onCleanup, onMount } from 'solid-js';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Editor, defaultValueCtx, rootCtx, editorViewOptionsCtx } from '@milkdown/kit/core';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
@@ -9,6 +10,12 @@ import { nord } from '@milkdown/theme-nord';
 import { $view } from '@milkdown/kit/utils';
 import { listItemSchema } from '@milkdown/kit/preset/commonmark';
 import '@milkdown/theme-nord/style.css';
+
+// Wikilink plugin
+import { wikilinkPlugin } from '../plugins/wikilinkPlugin';
+import { wikilinkView, setWikilinkNavigationContext } from '../plugins/wikilinkView';
+import { wikilinkAutocomplete, setAutocompleteContext } from '../plugins/wikilinkAutocomplete';
+import type { FileEntry } from '../services/fileService';
 
 // Syntax highlighting CSS
 import 'prismjs/themes/prism-tomorrow.css';
@@ -49,57 +56,59 @@ refractor.register(toml);
 interface WysiwygEditorProps {
   content: string;
   onContentChange: (markdown: string) => void;
+  files: FileEntry[];
+  onNavigate: (file: FileEntry) => void;
 }
 
 // Custom nodeView for task list items - renders actual checkbox
 const taskListItemView = $view(listItemSchema.node, () => {
   return (node, view, getPos) => {
     const isTask = node.attrs.checked !== undefined && node.attrs.checked !== null;
-    
+
     const li = document.createElement('li');
     li.dataset.itemType = isTask ? 'task' : 'normal';
-    
+
     if (isTask) {
       li.dataset.checked = String(node.attrs.checked);
       li.classList.add('task-list-item');
-      
+
       // Create actual checkbox
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = node.attrs.checked === true;
       checkbox.classList.add('task-checkbox');
       checkbox.contentEditable = 'false';
-      
+
       // Handle checkbox click
       checkbox.addEventListener('change', (e) => {
         e.preventDefault();
         const pos = getPos();
         if (pos === undefined) return;
-        
+
         const tr = view.state.tr.setNodeMarkup(pos, undefined, {
           ...node.attrs,
           checked: checkbox.checked,
         });
         view.dispatch(tr);
       });
-      
+
       li.appendChild(checkbox);
     }
-    
+
     // Content container
     const content = document.createElement('div');
     content.classList.add('task-content');
     li.appendChild(content);
-    
+
     return {
       dom: li,
       contentDOM: content,
       update: (updatedNode) => {
         if (updatedNode.type.name !== 'list_item') return false;
-        
+
         const isUpdatedTask = updatedNode.attrs.checked !== undefined && updatedNode.attrs.checked !== null;
         if (isTask !== isUpdatedTask) return false;
-        
+
         if (isTask) {
           const checkbox = li.querySelector('input[type="checkbox"]') as HTMLInputElement;
           if (checkbox) {
@@ -107,7 +116,7 @@ const taskListItemView = $view(listItemSchema.node, () => {
           }
           li.dataset.checked = String(updatedNode.attrs.checked);
         }
-        
+
         return true;
       },
     };
@@ -128,7 +137,7 @@ function WysiwygEditor(props: WysiwygEditorProps) {
           ctx.set(editorViewOptionsCtx, {
             attributes: { class: 'milkdown-editor' },
           });
-          
+
           // Configure prism with our registered refractor
           ctx.set(prismConfig.key, {
             configureRefractor: () => refractor,
@@ -141,7 +150,14 @@ function WysiwygEditor(props: WysiwygEditorProps) {
         .use(prism) // Syntax highlighting
         .use(listener)
         .use(taskListItemView) // Custom task list view with real checkboxes
+        .use(wikilinkPlugin) // Wikilink parsing and schema
+        .use(wikilinkView) // Wikilink click handling
+        .use(wikilinkAutocomplete) // Wikilink autocomplete
         .create();
+
+      // Set up wikilink navigation and autocomplete context
+      setWikilinkNavigationContext(props.files, props.onNavigate);
+      setAutocompleteContext(props.files);
 
       // Set up listener after editor is created
       editor.action((ctx) => {
@@ -159,7 +175,20 @@ function WysiwygEditor(props: WysiwygEditorProps) {
   });
 
   return (
-    <div class="wysiwyg-editor h-full overflow-auto">
+    <div
+      class="wysiwyg-editor h-full overflow-auto"
+      onClick={(e) => {
+        // Handle external link clicks
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'A') {
+          const href = target.getAttribute('href');
+          if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+            e.preventDefault();
+            openUrl(href).catch(console.error);
+          }
+        }
+      }}
+    >
       <div ref={ref} class="h-full milkdown" />
     </div>
   );

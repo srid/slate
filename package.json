@@ -28,6 +28,7 @@
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.2.0",
+    "@tauri-apps/plugin-opener": "^2.5.3",
     "@tiptap/extension-task-item": "^3.18.0",
     "@tiptap/extension-task-list": "^3.18.0",
     "@tiptap/pm": "^3.18.0",
