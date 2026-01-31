@@ -1,46 +1,30 @@
-import { createSignal, onMount, onCleanup, Show, For } from 'solid-js';
+import { onMount, onCleanup, Show, For } from 'solid-js';
 
 import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
 import WysiwygEditor from './components/WysiwygEditor';
 import FileFinder from './components/FileFinder';
 import { scanVault, type FileEntry } from './services/fileService';
+import { createAppStore, AppStoreProvider } from './store/appStore';
 
 // Vault directory relative to home
 const VAULT_ROOT_RELATIVE = 'Dropbox/Vault';
 
 function App() {
   console.log('[App] Rendering...');
-  // Multi-file state
-  const [files, setFiles] = createSignal<FileEntry[]>([]);
-  const [currentFile, setCurrentFile] = createSignal<FileEntry | null>(null);
-  const [finderOpen, setFinderOpen] = createSignal(false);
-
-  // Editor state
-  const [content, setContent] = createSignal('');
-  const [isLoaded, setIsLoaded] = createSignal(false);
-  const [isScanning, setIsScanning] = createSignal(true); // Vault scan in progress
-  const [isDirty, setIsDirty] = createSignal(false);
-  const [isDark, setIsDark] = createSignal(false);
-  const [saveStatus, setSaveStatus] = createSignal<'saved' | 'saving' | 'idle'>('idle');
-  const [error, setError] = createSignal<string | null>(null);
-  const [editorKey, setEditorKey] = createSignal(0);
-
-  // Navigation history
-  const [history, setHistory] = createSignal<FileEntry[]>([]);
-  const [historyIndex, setHistoryIndex] = createSignal(-1);
+  const [state, setState] = createAppStore();
 
   let saveTimeout: number | undefined;
 
   // Save current file immediately (used before switching)
   const saveCurrentFile = async (): Promise<void> => {
-    const file = currentFile();
-    if (!file || !isDirty()) return;
+    const file = state.vault.currentFile;
+    if (!file || !state.editor.isDirty) return;
 
     if (saveTimeout) clearTimeout(saveTimeout);
 
     try {
-      await writeTextFile(file.path, content());
-      setIsDirty(false);
+      await writeTextFile(file.path, state.editor.content);
+      setState('editor', 'isDirty', false);
     } catch (err) {
       console.error('Failed to save file:', err);
     }
@@ -51,41 +35,41 @@ function App() {
     // Save current file first if dirty
     await saveCurrentFile();
 
-    setIsLoaded(false);
-    setError(null);
+    setState('editor', 'isLoaded', false);
+    setState('ui', 'error', null);
 
     try {
       const fileExists = await exists(file.path);
       if (fileExists) {
         const text = await readTextFile(file.path);
-        setContent(text);
+        setState('editor', 'content', text);
       } else {
-        setError(`File not found: ${file.relativePath}`);
+        setState('ui', 'error', `File not found: ${file.relativePath}`);
         return;
       }
 
-      setCurrentFile(file);
-      setIsDirty(false);
-      setEditorKey(k => k + 1);
-      setIsLoaded(true);
+      setState('vault', 'currentFile', file);
+      setState('editor', 'isDirty', false);
+      setState('editor', 'key', k => k + 1);
+      setState('editor', 'isLoaded', true);
     } catch (err) {
-      setError(`Failed to load file: ${err}`);
+      setState('ui', 'error', `Failed to load file: ${err}`);
       console.error('Failed to load file:', err);
     }
   };
 
   // Handle file selection from finder or wikilink
   const handleFileSelect = (file: FileEntry, addToHistory = true) => {
-    setFinderOpen(false);
+    setState('ui', 'finderOpen', false);
 
     // Add to history if not navigating via back/forward
     if (addToHistory) {
-      const current = currentFile();
+      const current = state.vault.currentFile;
       if (current) {
         // Truncate forward history and add current file
-        const newHistory = [...history().slice(0, historyIndex() + 1), current];
-        setHistory(newHistory);
-        setHistoryIndex(newHistory.length - 1);
+        const newHistory = [...state.history.entries.slice(0, state.history.index + 1), current];
+        setState('history', 'entries', newHistory);
+        setState('history', 'index', newHistory.length - 1);
       }
     }
 
@@ -93,29 +77,29 @@ function App() {
   };
 
   // Navigation: Go Back
-  const canGoBack = () => historyIndex() >= 0;
+  const canGoBack = () => state.history.index >= 0;
   const goBack = () => {
     if (!canGoBack()) return;
-    const idx = historyIndex();
-    const file = history()[idx];
-    setHistoryIndex(idx - 1);
+    const idx = state.history.index;
+    const file = state.history.entries[idx];
+    setState('history', 'index', idx - 1);
     handleFileSelect(file, false);
   };
 
   // Navigation: Go Forward
   const canGoForward = () => {
-    const idx = historyIndex();
-    const h = history();
+    const idx = state.history.index;
+    const h = state.history.entries;
     // Can go forward if there's a current file and we're not at the end
-    return idx < h.length - 1 || (idx === h.length - 1 && currentFile() !== null);
+    return idx < h.length - 1 || (idx === h.length - 1 && state.vault.currentFile !== null);
   };
   const goForward = () => {
     if (!canGoForward()) return;
-    const idx = historyIndex();
-    const h = history();
+    const idx = state.history.index;
+    const h = state.history.entries;
     if (idx < h.length - 1) {
       const nextFile = h[idx + 1];
-      setHistoryIndex(idx + 1);
+      setState('history', 'index', idx + 1);
       handleFileSelect(nextFile, false);
     }
   };
@@ -125,36 +109,36 @@ function App() {
     // Theme
     const stored = localStorage.getItem('slate-theme');
     const prefersDark = stored === 'dark';
-    setIsDark(prefersDark);
+    setState('ui', 'isDark', prefersDark);
     document.documentElement.classList.toggle('dark', prefersDark);
 
     // Scan vault for markdown files
-    setIsScanning(true);
+    setState('vault', 'isScanning', true);
     try {
       const vaultFiles = await scanVault(VAULT_ROOT_RELATIVE);
-      setFiles(vaultFiles);
-      setIsScanning(false);
+      setState('vault', 'files', vaultFiles);
+      setState('vault', 'isScanning', false);
 
       // Load INBOX.md by default, or first file if not found
       if (vaultFiles.length > 0) {
         const inbox = vaultFiles.find(f => f.name.toLowerCase() === 'inbox.md');
         await loadFile(inbox || vaultFiles[0]);
       } else {
-        setError('No markdown files found in vault');
-        setIsLoaded(true);
+        setState('ui', 'error', 'No markdown files found in vault');
+        setState('editor', 'isLoaded', true);
       }
     } catch (err) {
-      setIsScanning(false);
-      setError(`Failed to scan vault: ${err}`);
+      setState('vault', 'isScanning', false);
+      setState('ui', 'error', `Failed to scan vault: ${err}`);
       console.error('Failed to scan vault:', err);
-      setIsLoaded(true);
+      setState('editor', 'isLoaded', true);
     }
 
     // Global keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault();
-        setFinderOpen(true);
+        setState('ui', 'finderOpen', true);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
@@ -175,113 +159,115 @@ function App() {
   });
 
   const toggleTheme = () => {
-    const newDark = !isDark();
-    setIsDark(newDark);
+    const newDark = !state.ui.isDark;
+    setState('ui', 'isDark', newDark);
     document.documentElement.classList.toggle('dark', newDark);
     localStorage.setItem('slate-theme', newDark ? 'dark' : 'light');
   };
 
   const handleContentChange = (newContent: string) => {
-    setContent(newContent);
-    setIsDirty(true);
-    setError(null);
+    setState('editor', 'content', newContent);
+    setState('editor', 'isDirty', true);
+    setState('ui', 'error', null);
 
-    const file = currentFile();
+    const file = state.vault.currentFile;
     if (!file) return;
 
     // Debounced auto-save
     if (saveTimeout) clearTimeout(saveTimeout);
     saveTimeout = window.setTimeout(async () => {
       try {
-        setSaveStatus('saving');
+        setState('editor', 'saveStatus', 'saving');
         await writeTextFile(file.path, newContent);
-        setIsDirty(false);
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 1500);
+        setState('editor', 'isDirty', false);
+        setState('editor', 'saveStatus', 'saved');
+        setTimeout(() => setState('editor', 'saveStatus', 'idle'), 1500);
       } catch (err) {
-        setError(`Auto-save failed: ${err}`);
+        setState('ui', 'error', `Auto-save failed: ${err}`);
         console.error('Auto-save failed:', err);
       }
     }, 500);
   };
 
   const getDisplayPath = () => {
-    const file = currentFile();
+    const file = state.vault.currentFile;
     return file ? file.relativePath : 'No file';
   };
 
   return (
-    <div class="flex flex-col h-screen bg-[var(--color-bg-primary)]">
-      {/* File Finder Modal */}
-      <FileFinder
-        files={files()}
-        isOpen={finderOpen()}
-        onClose={() => setFinderOpen(false)}
-        onSelect={handleFileSelect}
-      />
+    <AppStoreProvider value={[state, setState]}>
+      <div class="flex flex-col h-screen bg-[var(--color-bg-primary)]">
+        {/* File Finder Modal */}
+        <FileFinder
+          files={state.vault.files}
+          isOpen={state.ui.finderOpen}
+          onClose={() => setState('ui', 'finderOpen', false)}
+          onSelect={handleFileSelect}
+        />
 
-      {/* Error Banner */}
-      <Show when={error()}>
-        <div class="px-4 py-2 bg-red-500/20 border-b border-red-500/50 text-red-400 text-sm">
-          ⚠️ {error()}
-        </div>
-      </Show>
-
-      {/* Toolbar */}
-      <header class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
-        <div class="flex items-center gap-3">
-          <h1 class="text-lg font-semibold text-[var(--color-text-primary)]">Slate</h1>
-          <button
-            class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] cursor-pointer"
-            onClick={() => setFinderOpen(true)}
-            title="Open file (Ctrl+P)"
-          >
-            {isScanning() ? 'Scanning vault...' : getDisplayPath()}
-            {saveStatus() === 'saving' && <span class="text-[var(--color-text-muted)] ml-2">Saving...</span>}
-            {saveStatus() === 'saved' && <span class="text-green-500 ml-2">Saved</span>}
-            {isDirty() && saveStatus() === 'idle' && <span class="text-[var(--color-accent)] ml-1">•</span>}
-          </button>
-        </div>
-        <div class="flex items-center gap-2">
-          {/* Back/Forward navigation */}
-          <button
-            class="toolbar-button"
-            onClick={goBack}
-            disabled={!canGoBack()}
-            title="Go back (Alt+Left)"
-            style={{ opacity: canGoBack() ? 1 : 0.4 }}
-          >
-            <BackIcon />
-          </button>
-          <button
-            class="toolbar-button"
-            onClick={goForward}
-            disabled={!canGoForward()}
-            title="Go forward (Alt+Right)"
-            style={{ opacity: canGoForward() ? 1 : 0.4 }}
-          >
-            <ForwardIcon />
-          </button>
-          <button class="toolbar-button" onClick={toggleTheme} title={isDark() ? 'Switch to light mode' : 'Switch to dark mode'}>
-            {isDark() ? <SunIcon /> : <MoonIcon />}
-          </button>
-        </div>
-      </header>
-
-      {/* WYSIWYG Editor */}
-      <main class="flex-1 overflow-hidden">
-        <Show when={isLoaded() && currentFile()} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
-          <For each={[editorKey()]}>
-            {(_key) => <WysiwygEditor
-              content={content()}
-              onContentChange={handleContentChange}
-              files={files()}
-              onNavigate={handleFileSelect}
-            />}
-          </For>
+        {/* Error Banner */}
+        <Show when={state.ui.error}>
+          <div class="px-4 py-2 bg-red-500/20 border-b border-red-500/50 text-red-400 text-sm">
+            ⚠️ {state.ui.error}
+          </div>
         </Show>
-      </main>
-    </div>
+
+        {/* Toolbar */}
+        <header class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
+          <div class="flex items-center gap-3">
+            <h1 class="text-lg font-semibold text-[var(--color-text-primary)]">Slate</h1>
+            <button
+              class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] cursor-pointer"
+              onClick={() => setState('ui', 'finderOpen', true)}
+              title="Open file (Ctrl+P)"
+            >
+              {state.vault.isScanning ? 'Scanning vault...' : getDisplayPath()}
+              {state.editor.saveStatus === 'saving' && <span class="text-[var(--color-text-muted)] ml-2">Saving...</span>}
+              {state.editor.saveStatus === 'saved' && <span class="text-green-500 ml-2">Saved</span>}
+              {state.editor.isDirty && state.editor.saveStatus === 'idle' && <span class="text-[var(--color-accent)] ml-1">•</span>}
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            {/* Back/Forward navigation */}
+            <button
+              class="toolbar-button"
+              onClick={goBack}
+              disabled={!canGoBack()}
+              title="Go back (Alt+Left)"
+              style={{ opacity: canGoBack() ? 1 : 0.4 }}
+            >
+              <BackIcon />
+            </button>
+            <button
+              class="toolbar-button"
+              onClick={goForward}
+              disabled={!canGoForward()}
+              title="Go forward (Alt+Right)"
+              style={{ opacity: canGoForward() ? 1 : 0.4 }}
+            >
+              <ForwardIcon />
+            </button>
+            <button class="toolbar-button" onClick={toggleTheme} title={state.ui.isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
+              {state.ui.isDark ? <SunIcon /> : <MoonIcon />}
+            </button>
+          </div>
+        </header>
+
+        {/* WYSIWYG Editor */}
+        <main class="flex-1 overflow-hidden">
+          <Show when={state.editor.isLoaded && state.vault.currentFile} fallback={<div class="p-4 text-[var(--color-text-muted)]">Loading...</div>}>
+            <For each={[state.editor.key]}>
+              {(_key) => <WysiwygEditor
+                content={state.editor.content}
+                onContentChange={handleContentChange}
+                files={state.vault.files}
+                onNavigate={handleFileSelect}
+              />}
+            </For>
+          </Show>
+        </main>
+      </div>
+    </AppStoreProvider>
   );
 }
 
