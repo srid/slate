@@ -9,8 +9,11 @@ import { createAppStore, AppStoreProvider } from './store/appStore';
 // Vault directory relative to home
 const VAULT_ROOT_RELATIVE = 'Dropbox/Vault';
 
+const APP_START = performance.now();
+console.log('[App] Module loaded at:', APP_START.toFixed(0), 'ms');
+
 function App() {
-  console.log('[App] Rendering...');
+  console.log('[App] Rendering at:', (performance.now() - APP_START).toFixed(0), 'ms since module load');
   const [state, setState] = createAppStore();
 
   let saveTimeout: number | undefined;
@@ -106,6 +109,8 @@ function App() {
 
   // Initialize on mount
   onMount(async () => {
+    console.log('[App] onMount at:', (performance.now() - APP_START).toFixed(0), 'ms');
+
     // Theme
     const stored = localStorage.getItem('slate-theme');
     const prefersDark = stored === 'dark';
@@ -113,16 +118,20 @@ function App() {
     document.documentElement.classList.toggle('dark', prefersDark);
 
     // Scan vault for markdown files
+    console.log('[App] Starting vault scan at:', (performance.now() - APP_START).toFixed(0), 'ms');
     setState('vault', 'isScanning', true);
     try {
       const vaultFiles = await scanVault(VAULT_ROOT_RELATIVE);
+      console.log('[App] Vault scan complete at:', (performance.now() - APP_START).toFixed(0), 'ms');
       setState('vault', 'files', vaultFiles);
       setState('vault', 'isScanning', false);
 
       // Load INBOX.md by default, or first file if not found
       if (vaultFiles.length > 0) {
         const inbox = vaultFiles.find(f => f.name.toLowerCase() === 'inbox.md');
+        console.log('[App] Starting loadFile at:', (performance.now() - APP_START).toFixed(0), 'ms');
         await loadFile(inbox || vaultFiles[0]);
+        console.log('[App] loadFile complete at:', (performance.now() - APP_START).toFixed(0), 'ms');
       } else {
         setState('ui', 'error', 'No markdown files found in vault');
         setState('editor', 'isLoaded', true);
